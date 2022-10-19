@@ -83,6 +83,9 @@ class H:
             shutil.rmtree(tmpdir)
         return True
 
+    def _handle_variable(self, text):
+        pass
+
     @staticmethod
     def load_ini(filename: str) -> Dict[str, Any]:
         if not os.path.exists(filename):
@@ -95,10 +98,10 @@ class H:
                 with open(filename, mode='r', encoding=encoding) as f:
                     content = f.read()
                     break
-            except IOError:
+            except Exception:
                 pass
         if not content:
-            raise HException(f'unnable to read file "{filename}"')
+            raise HException(f'unable to read file "{filename}"')
 
         # parse content
         config = {}
@@ -125,7 +128,8 @@ class H:
         return config
 
 
-try:
-    H(parse_args()).run()
-except Exception as e:
-    print(e)
+if __name__ == '__main__':
+    try:
+        H(parse_args()).run()
+    except Exception as e:
+        print(e)
