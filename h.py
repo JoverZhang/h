@@ -70,22 +70,40 @@ class H:
         if code != 0:
             return False
         with open(tmpoutput, mode='r', encoding='utf-8') as f:
-            text = f.read().strip('\r\n\t ')
-            ops = text.find(':')
+            command = f.read().strip('\r\n\t ')
+            ops = command.find(':')
             if ops < 0:
                 return False
-            text = text[ops + 1:].rstrip('\r\n\t ')
-            if not text:
+            command = command[ops + 1:].rstrip('\r\n\t ')
+            if not command:
                 return False
-            print(text)
-            os.system(text)
+            print(command)
+            command = self._handle_variable(command)
+            print(command)
+            os.system(command)
         # remove tmpdir
         if tmpdir:
             shutil.rmtree(tmpdir)
         return True
 
-    def _handle_variable(self, text):
-        pass
+    @staticmethod
+    def _handle_variable(command) -> str:
+        mark_open = '$(?'
+        mark_close = ')'
+        while True:
+            p1 = command.find(mark_open)
+            if p1 < 0:
+                break
+            p2 = command.find(mark_close, p1)
+            name = command[p1 + len(mark_open): p2]
+            data = input(f'Input argument ({name}): ')
+            if data is None:
+                data = ''
+            mark = mark_open + name + mark_close
+            command = command.replace(mark, data)
+            if p2 < 0:
+                break
+        return command
 
     @staticmethod
     def load_ini(filename: str) -> Dict[str, Any]:
