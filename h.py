@@ -12,14 +12,14 @@ def replace_env(s: Optional[str]) -> Optional[str]:
         return None
     for k in list(os.environ.keys()):
         s = s.replace(f'${k}', os.getenv(k))
-    return s
+    return os.path.expanduser(s)
 
 
 def parse_args() -> Namespace:
     parser: ArgumentParser = ArgumentParser()
     parser.add_argument('-f', '--file',
                         dest='config_file',
-                        type=str, default='$HOME/.config/h_command/config.ini',
+                        type=str, default='~/.config/h_command/config.ini',
                         help='config file')
     parser.add_argument('-i', '--interactive',
                         dest='interactive', action='store_true',
@@ -38,6 +38,11 @@ class H:
     def __init__(self, args: Namespace):
         self.args = args
         self.config = self.load_ini(self.args.config_file)
+        includes: str = self.config['global'].get('includes')
+        if includes:
+            for include in includes.split(','):
+                filename = replace_env(include.strip())
+                self.config.update(self.load_ini(filename))
 
     def run(self) -> bool:
         cmd = 'fzf --nth=1 --reverse +s --inline-info --height 35% --no-mouse'
