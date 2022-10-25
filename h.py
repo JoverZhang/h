@@ -52,7 +52,7 @@ class H:
             if k == 'global':
                 continue
             k = k + ' ' * (width - len(k) + 2)
-            rows.append(f'{k}:{v["command"]}\n')
+            rows.append(f'{k}:{v["command"].strip()}\n')
 
         tmpdir = tempfile.mkdtemp('h')
         tmpname = os.path.join(tmpdir, 'command.txt')
@@ -77,6 +77,7 @@ class H:
             text = text[ops + 1:].rstrip('\r\n\t ')
             if not text:
                 return False
+            print(text)
             os.system(text)
         # remove tmpdir
         if tmpdir:
