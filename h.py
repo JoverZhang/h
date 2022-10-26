@@ -19,7 +19,7 @@ def parse_args() -> Namespace:
     parser: ArgumentParser = ArgumentParser()
     parser.add_argument('-f', '--file',
                         dest='config_file',
-                        type=str, default='~/.config/h_command/config.ini',
+                        type=str, default='~/.config/h_command/config',
                         help='config file')
     parser.add_argument('-i', '--interactive',
                         dest='interactive', action='store_true',
