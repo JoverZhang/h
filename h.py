@@ -34,6 +34,18 @@ class HException(Exception):
         super().__init__(msg)
 
 
+class Colors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+
 class H:
     def __init__(self, args: Namespace):
         self.args = args
@@ -82,10 +94,11 @@ class H:
             command = command[ops + 1:].rstrip('\r\n\t ')
             if not command:
                 return False
-            print(command)
-            command = self._handle_variable(command)
-            print(command)
-            os.system(command)
+            print(Colors.OKBLUE + command + Colors.ENDC)
+            actual_command = self._handle_variable(command)
+            if actual_command != command:
+                print(Colors.OKBLUE + actual_command + Colors.ENDC)
+            os.system(actual_command)
         # remove tmpdir
         if tmpdir:
             shutil.rmtree(tmpdir)
