@@ -4,9 +4,7 @@ import shutil
 import sys
 import tempfile
 from argparse import Namespace, ArgumentParser
-from typing import Dict, Optional, List, ClassVar
-
-log = None
+from typing import Dict, Optional, List, ClassVar, Tuple
 
 
 class Logger:
@@ -39,6 +37,9 @@ class Logger:
         print(Logger._ERROR + msg + Logger._END)
 
 
+log: Optional[Logger] = None
+
+
 class Util:
     @staticmethod
     def replace_env(s: Optional[str]) -> Optional[str]:
@@ -65,26 +66,55 @@ class Util:
 
 
 class Arguments:
+    command_title: Optional[str]
+    command_args: Optional[Dict[str | int, str]]
+
     config_file: str
-    interactive: bool
     debug: bool
+    no_history: bool
 
     def __init__(self):
-        parser: ArgumentParser = ArgumentParser()
-        parser.add_argument('-f', '--file',
+        parser: ArgumentParser = ArgumentParser(
+            prog='h',
+            usage='%(prog)s [options] [TITLE [arg]...]')
+
+        parser.add_argument('title',
+                            type=str, nargs='*',
+                            help='command title')
+
+        parser.add_argument('-f',
                             dest='config_file',
                             type=str, default='~/.config/h_command/config',
                             help='config file')
-        parser.add_argument('-i', '--interactive',
-                            dest='interactive', action='store_true',
-                            help='interactive mode')
+        parser.add_argument('--no-history',
+                            dest='no_history', action='store_true',
+                            help="do not append command to the history log")
         parser.add_argument('--debug',
                             dest='debug', action='store_true',
                             help='print debug log')
+
         args: Namespace = parser.parse_args()
+
+        self.command_title, self.command_args = self._parse_title(args.title)
         self.config_file = Util.replace_env(args.config_file)
+        self.no_history = args.no_history
         self.debug = args.debug
-        self.interactive = args.interactive
+
+    @staticmethod
+    def _parse_title(title: List[str]) \
+            -> Tuple[Optional[str], Optional[Dict[str | int, str]]]:
+        if not title:
+            return None, None
+        rst = {}
+        cmd = title[0]
+        args = title[1:]
+        for i, arg in enumerate(args):
+            name, eq, val = arg.partition('=')
+            if eq:
+                rst[name] = val
+            else:
+                rst[i] = name
+        return cmd, rst
 
 
 class ConfigItem:
@@ -183,7 +213,22 @@ class Core:
     def __init__(self, config: Config):
         self.config = config
 
-    def run(self) -> bool:
+    def run(self, title: str, args: Dict[str | int, str] = None):
+        log.debug(f'run({title}, {args})')
+
+        item = self.config.item(title)
+        if not item:
+            assert False, f'title "{title}" not found'
+
+        log.tips(item.command)
+        command = self._handle_variables(item.command, args)
+        if command != item.command:
+            log.tips(command)
+
+        os.system(command)
+
+    def interactive(self) -> bool:
+        log.debug('interactive()')
         tool = self.config.get_settings().tool or 'fzf'
         flags = '--nth=1 --reverse +s --inline-info --height 35% --no-mouse'
         flags = self.config.get_settings().flags or flags
@@ -228,48 +273,87 @@ class Core:
             ops = line.find(':')
             if ops < 0:
                 return False
-            command = line[ops + 1:].rstrip('\r\n\t ')
-            if not command:
-                return False
-            log.tips(command)
-            actual_command = self._handle_variables(command)
-            if actual_command != command:
-                log.tips(actual_command)
-            os.system(actual_command)
+            title = line[:ops].strip()
+            log.tips(f'[{title}]')
+            self.run(title)
 
         # remove temp directory when end
         if tmpdir:
             shutil.rmtree(tmpdir)
         return True
 
-    def _handle_variables(self, command: str) -> str:
+    def _handle_variables(self, command: str,
+                          args: Dict[str | int, str]) -> str:
         mark_open = self.mark_open
         mark_close = self.mark_close
+
+        variables = {}
+        i = 0
         while True:
-            p1 = command.find(mark_open)
+            p1 = command.find(mark_open, i)
             if p1 < 0:
                 break
             p2 = command.find(mark_close, p1)
             if p2 < 0:
                 break
+
             full_name = command[p1 + len(mark_open):p2]
 
             # handle default variable
-            name, sep, default = full_name.strip().partition(':')
+            name, _, default = full_name.strip().partition(':')
+            variables[name] = {
+                'name': name,
+                'default': default,
+                'full_name': full_name,
+                'mark': mark_open + full_name + mark_close,
+            }
+            i = p2
 
-            data = input(f'Input argument ({full_name}): ')
+        # handle args
+        for name in list(args.keys()):
+            v = variables.get(name)
+            if not v:
+                continue
+            command = command.replace(v['mark'], args[name])
+            args.pop(name)
+            variables.pop(name)
+
+        # handle anonymous args
+        values = list(args.values())
+        for v in list(variables.values()):
+            if not values:
+                break
+            command = command.replace(v['mark'], values.pop(0))
+            variables.pop(v['name'])
+
+        # handle unspecified variables
+        for name, v in variables.items():
+            data = input(f'Input argument ({v["full_name"]}): ')
             if not data:
-                data = default or ''
-            mark = mark_open + full_name + mark_close
-            command = command.replace(mark, data)
+                data = v['default'] or ''
+            command = command.replace(v['mark'], data)
+
         return command
 
 
-if __name__ == '__main__':
-    try:
-        arguments = Arguments()
-        log = Logger(arguments.debug)
+def main():
+    arguments = Arguments()
 
-        Core(Config(arguments.config_file)).run()
+    global log
+    log = Logger(arguments.debug)
+
+    try:
+        core = Core(Config(arguments.config_file))
+
+        if arguments.command_title:
+            core.run(arguments.command_title, arguments.command_args)
+        else:
+            core.interactive()
     except Exception as e:
         log.error(f'error: {e}')
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == '__main__':
+    main()
