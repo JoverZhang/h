@@ -213,7 +213,7 @@ class Core:
     def __init__(self, config: Config):
         self.config = config
 
-    def run(self, title: str, args: Dict[str | int, str] = None):
+    def run(self, title: str, args: Dict[str | int, str]):
         log.debug(f'run({title}, {args})')
 
         item = self.config.item(title)
@@ -275,7 +275,7 @@ class Core:
                 return False
             title = line[:ops].strip()
             log.tips(f'[{title}]')
-            self.run(title)
+            self.run(title, {})
 
         # remove temp directory when end
         if tmpdir:
