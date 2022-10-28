@@ -4,169 +4,268 @@ import shutil
 import sys
 import tempfile
 from argparse import Namespace, ArgumentParser
-from typing import Dict, Any, Optional, List
+from typing import Dict, Optional, List, ClassVar
+
+log = None
 
 
-def replace_env(s: Optional[str]) -> Optional[str]:
-    if not s:
-        return None
-    for k in list(os.environ.keys()):
-        s = s.replace(f'${k}', os.getenv(k))
-    return os.path.expanduser(s)
+class Logger:
+    _HEADER = '\033[95m'
+    _TIPS = '\033[94m'
+    _WARN = '\033[93m'
+    _ERROR = '\033[91m'
+    _BOLD = '\033[1m'
+    _UNDERLINE = '\033[4m'
+    _END = '\033[0m'
 
+    enable_debug: bool
 
-def parse_args() -> Namespace:
-    parser: ArgumentParser = ArgumentParser()
-    parser.add_argument('-f', '--file',
-                        dest='config_file',
-                        type=str, default='~/.config/h_command/config',
-                        help='config file')
-    parser.add_argument('-i', '--interactive',
-                        dest='interactive', action='store_true',
-                        help='interactive mode')
-    args: Namespace = parser.parse_args()
-    args.config_file = replace_env(args.config_file)
-    return args
-
-
-class HException(Exception):
-    def __init__(self, msg: str) -> None:
-        super().__init__(msg)
-
-
-class Colors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-
-
-class H:
-    def __init__(self, args: Namespace):
-        self.args = args
-        self.config = self.load_ini(self.args.config_file)
-        includes: str = self.config['global'].get('includes')
-        if includes:
-            for include in includes.split(','):
-                filename = replace_env(include.strip())
-                self.config.update(self.load_ini(filename))
-
-    def run(self) -> bool:
-        cmd = 'fzf --nth=1 --reverse +s --inline-info --height 35% --no-mouse'
-
-        rows: List[str] = []
-        width = 0
-        for k in self.config.keys():
-            if len(k) > width:
-                width = len(k)
-        for k in self.config.keys():
-            v = self.config[k]
-            if k == 'global':
-                continue
-            k = k + ' ' * (width - len(k) + 2)
-            rows.append(f'{k}:{v["command"].strip()}\n')
-
-        tmpdir = tempfile.mkdtemp('h')
-        tmpname = os.path.join(tmpdir, 'command.txt')
-        tmpoutput = os.path.join(tmpdir, 'output.txt')
-        if os.path.exists(tmpoutput):
-            os.remove(tmpoutput)
-        with open(tmpname, 'w', encoding='utf-8') as f:
-            for i in rows:
-                f.write(i)
-        if sys.platform[:3] != 'win':
-            cmd += f' <"{tmpname}" > "{tmpoutput}"'
-        else:
-            raise HException('unsupport windows platform')
-        code = os.system(cmd)
-        if code != 0:
-            return False
-        with open(tmpoutput, mode='r', encoding='utf-8') as f:
-            command = f.read().strip('\r\n\t ')
-            ops = command.find(':')
-            if ops < 0:
-                return False
-            command = command[ops + 1:].rstrip('\r\n\t ')
-            if not command:
-                return False
-            print(Colors.OKBLUE + command + Colors.ENDC)
-            actual_command = self._handle_variable(command)
-            if actual_command != command:
-                print(Colors.OKBLUE + actual_command + Colors.ENDC)
-            os.system(actual_command)
-        # remove tmpdir
-        if tmpdir:
-            shutil.rmtree(tmpdir)
-        return True
+    def __init__(self, enable_debug: bool = False):
+        self.enable_debug = enable_debug
 
     @staticmethod
-    def _handle_variable(command) -> str:
-        mark_open = '$(?'
-        mark_close = ')'
-        while True:
-            p1 = command.find(mark_open)
-            if p1 < 0:
-                break
-            p2 = command.find(mark_close, p1)
-            name = command[p1 + len(mark_open): p2]
-            data = input(f'Input argument ({name}): ')
-            if data is None:
-                data = ''
-            mark = mark_open + name + mark_close
-            command = command.replace(mark, data)
-            if p2 < 0:
-                break
-        return command
+    def tips(msg: str):
+        print(Logger._TIPS + msg + Logger._END)
+
+    def debug(self, msg: str):
+        self.enable_debug and print(Logger._HEADER + msg + Logger._END)
 
     @staticmethod
-    def load_ini(filename: str) -> Dict[str, Any]:
-        if not os.path.exists(filename):
-            raise HException(f'config file "{filename}" not found')
+    def warn(msg: str):
+        print(Logger._WARN + msg + Logger._END)
 
-        # read config file
+    @staticmethod
+    def error(msg: str):
+        print(Logger._ERROR + msg + Logger._END)
+
+
+class Util:
+    @staticmethod
+    def replace_env(s: Optional[str]) -> Optional[str]:
+        if not s:
+            return None
+        for k in list(os.environ.keys()):
+            s = s.replace(f'${k}', os.getenv(k))
+        return os.path.expanduser(s)
+
+    @staticmethod
+    def read_file(filename: str, encoding: str = 'utf-8') -> str:
+        filename = Util.replace_env(filename.strip())
+        assert os.path.exists(filename), f'the file "{filename}" does not exist'
         content = None
-        for encoding in ['utf-8', 'latin1', 'gbk']:
+        for encoding in [encoding, 'latin1', 'gbk']:
             try:
                 with open(filename, mode='r', encoding=encoding) as f:
                     content = f.read()
                     break
             except Exception:
                 pass
-        if not content:
-            raise HException(f'unable to read file "{filename}"')
+        assert content, f'unable to read file "{filename}"'
+        return content
 
-        # parse content
-        config = {}
-        sect = 'global'
+
+class Arguments:
+    config_file: str
+    interactive: bool
+    debug: bool
+
+    def __init__(self):
+        parser: ArgumentParser = ArgumentParser()
+        parser.add_argument('-f', '--file',
+                            dest='config_file',
+                            type=str, default='~/.config/h_command/config',
+                            help='config file')
+        parser.add_argument('-i', '--interactive',
+                            dest='interactive', action='store_true',
+                            help='interactive mode')
+        parser.add_argument('--debug',
+                            dest='debug', action='store_true',
+                            help='print debug log')
+        args: Namespace = parser.parse_args()
+        self.config_file = Util.replace_env(args.config_file)
+        self.debug = args.debug
+        self.interactive = args.interactive
+
+
+class ConfigItem:
+    title: str
+    command: str
+
+    # Global fields
+    tool: Optional[str]
+    flags: Optional[str]
+    includes: Optional[List[str]]
+
+    def __init__(self, title: str):
+        self.title = title
+        self.command = ''
+        self.tool = None
+        self.flags = None
+        self.includes = None
+
+    def __str__(self):
+        if not self.tool:
+            return f'{self.title}: command="{self.command}"'
+        return f'{self.title}: tool="{self.tool}", includes={self.includes}'
+
+
+class Config:
+    SETTINGS: ClassVar[str] = '__SETTINGS__'
+    _root_config_file: str
+    _config: dict[str, ConfigItem]
+
+    def __init__(self, root_config_file: str):
+        self._root_config_file = root_config_file
+
+        # load config items
+        self._config = {}
+        self._load_config(self._config, root_config_file)
+        for filename in self.get_settings().includes:
+            self._load_config(self._config, filename)
+
+        # debug log for config items
+        log.debug('config items:')
+        for k, v in self._config.items():
+            log.debug(' ' * 4 + v.__str__())
+
+    def __iter__(self):
+        return iter(self._config)
+
+    def item(self, title) -> Optional[ConfigItem]:
+        return self._config.get(title)
+
+    def get_settings(self):
+        return self.item(Config.SETTINGS)
+
+    def _load_config(self, config: Dict[str, ConfigItem],
+                     filename: str, encoding: str = 'utf-8'):
+        content = Util.read_file(filename, encoding)
+        title: str = Config.SETTINGS
+        line_num: int = 0
         for line in content.split('\n'):
+            line_num += 1
             line = line.strip('\r\n\t ')
-            if not line:
+            # skip empty or comment line
+            if not line or line[:1] in ('#', ';'):
                 continue
-            elif line[:1] in ('#', ';'):
-                continue
+            # title
             elif line.startswith('['):
-                if line.endswith(']'):
-                    sect = line[1:-1].strip('\r\n\t ')
-                    if sect not in config:
-                        config[sect] = {}
+                assert line.endswith(']'), \
+                    f'invalid syntax "{line}" in "{filename}:{line_num}"'
+                title = line[1:-1].strip('\r\n\t ')
+                if title not in config:
+                    config[title] = ConfigItem(title)
+            # fields
             else:
                 pos = line.find('=')
                 if pos >= 0:
-                    key = line[:pos].rstrip('\r\n\t ')
-                    val = line[pos + 1:].rstrip('\r\n\t ')
-                    if sect not in config:
-                        config[sect] = {}
-                    config[sect][key] = val
-        return config
+                    field = line[:pos].strip('\r\n\t ')
+                    value = line[pos + 1:].strip('\r\n\t ')
+                    if title not in config:
+                        config[title] = ConfigItem(title)
+                    if field == 'command':
+                        config[title].command = value
+                    elif field == 'tool':
+                        config[title].tool = value
+                    elif field == 'flags':
+                        config[title].flags = value
+                    elif field == 'includes':
+                        config[title].includes = value.split(',')
+
+
+class Core:
+    config: Config
+
+    # variables mark
+    mark_open = '$(?'
+    mark_close = ')'
+
+    def __init__(self, config: Config):
+        self.config = config
+
+    def run(self) -> bool:
+        tool = self.config.get_settings().tool or 'fzf'
+        flags = '--nth=1 --reverse +s --inline-info --height 35% --no-mouse'
+        flags = self.config.get_settings().flags or flags
+
+        # calc title print width
+        width = 0
+        for title in self.config:
+            if len(title) > width:
+                width = len(title)
+
+        # create temp directory
+        tmpdir = tempfile.mkdtemp('h')
+        tmp_commands = os.path.join(tmpdir, 'commands.tmp')
+        tmp_output = os.path.join(tmpdir, 'output.tmp')
+
+        # write command list
+        with open(tmp_commands, mode='w', encoding='utf-8') as f:
+            for title in self.config:
+                if title == Config.SETTINGS:
+                    continue
+                item = self.config.item(title)
+                title = title + ' ' * (width - len(title) + 2)
+                row = f'{title}:{item.command}'
+                f.write(row + '\n')
+
+        # run tool
+        log.debug(f'current platform: {sys.platform}')
+        cmd = f'{tool} {flags}'
+        if sys.platform[:3] != 'win':
+            cmd += f' < "{tmp_commands}" > {tmp_output}'
+        else:
+            # TODO: support windows
+            assert False, 'unsupported windows platform'
+        log.debug(cmd)
+        code = os.system(cmd)
+        if code:
+            return False
+
+        # read command from tmp_output, and run
+        with open(tmp_output, mode='r', encoding='utf-8') as f:
+            line = f.read().strip('\r\n\t ')
+            ops = line.find(':')
+            if ops < 0:
+                return False
+            command = line[ops + 1:].rstrip('\r\n\t ')
+            if not command:
+                return False
+            log.tips(command)
+            actual_command = self._handle_variables(command)
+            if actual_command != command:
+                log.tips(actual_command)
+            os.system(actual_command)
+
+        # remove temp directory when end
+        if tmpdir:
+            shutil.rmtree(tmpdir)
+        return True
+
+    def _handle_variables(self, command: str) -> str:
+        mark_open = self.mark_open
+        mark_close = self.mark_close
+        while True:
+            p1 = command.find(mark_open)
+            if p1 < 0:
+                break
+            p2 = command.find(mark_close, p1)
+            if p2 < 0:
+                break
+            name = command[p1 + len(mark_open):p2]
+            data = input(f'Input argument ({name}): ')
+            if data is None:
+                data = ''
+            mark = mark_open + name + mark_close
+            command = command.replace(mark, data)
+        return command
 
 
 if __name__ == '__main__':
     try:
-        H(parse_args()).run()
+        arguments = Arguments()
+        log = Logger(arguments.debug)
+
+        Core(Config(arguments.config_file)).run()
     except Exception as e:
-        print(e)
+        log.error(f'error: {e}')
