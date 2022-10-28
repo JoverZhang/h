@@ -244,43 +244,44 @@ class Core:
         tmp_commands = os.path.join(tmpdir, 'commands.tmp')
         tmp_output = os.path.join(tmpdir, 'output.tmp')
 
-        # write command list
-        with open(tmp_commands, mode='w', encoding='utf-8') as f:
-            for title in self.config:
-                if title == Config.SETTINGS:
-                    continue
-                item = self.config.item(title)
-                title = title + ' ' * (width - len(title) + 2)
-                row = f'{title}:{item.command}'
-                f.write(row + '\n')
+        try:
+            # write command list
+            with open(tmp_commands, mode='w', encoding='utf-8') as f:
+                for title in self.config:
+                    if title == Config.SETTINGS:
+                        continue
+                    item = self.config.item(title)
+                    title = title + ' ' * (width - len(title) + 2)
+                    row = f'{title}:{item.command}'
+                    f.write(row + '\n')
 
-        # run tool
-        log.debug(f'current platform: {sys.platform}')
-        cmd = f'{tool} {flags}'
-        if sys.platform[:3] != 'win':
-            cmd += f' < "{tmp_commands}" > {tmp_output}'
-        else:
-            # TODO: support windows
-            assert False, 'unsupported windows platform'
-        log.debug(cmd)
-        code = os.system(cmd)
-        if code:
-            return False
-
-        # read command from tmp_output, and run
-        with open(tmp_output, mode='r', encoding='utf-8') as f:
-            line = f.read().strip('\r\n\t ')
-            ops = line.find(':')
-            if ops < 0:
+            # run tool
+            log.debug(f'current platform: {sys.platform}')
+            cmd = f'{tool} {flags}'
+            if sys.platform[:3] != 'win':
+                cmd += f' < "{tmp_commands}" > {tmp_output}'
+            else:
+                # TODO: support windows
+                assert False, 'unsupported windows platform'
+            log.debug(cmd)
+            code = os.system(cmd)
+            if code:
                 return False
-            title = line[:ops].strip()
-            log.tips(f'[{title}]')
-            self.run(title, {})
 
-        # remove temp directory when end
-        if tmpdir:
-            shutil.rmtree(tmpdir)
-        return True
+            # read command from tmp_output, and run
+            with open(tmp_output, mode='r', encoding='utf-8') as f:
+                line = f.read().strip('\r\n\t ')
+                ops = line.find(':')
+                if ops < 0:
+                    return False
+                title = line[:ops].strip()
+                log.tips(f'[{title}]')
+                self.run(title, {})
+            return True
+        # remove temp directory
+        finally:
+            if tmpdir:
+                shutil.rmtree(tmpdir)
 
     def _handle_variables(self, command: str,
                           args: Dict[str | int, str]) -> str:
@@ -350,7 +351,8 @@ def main():
         else:
             core.interactive()
     except Exception as e:
-        log.error(f'error: {e}')
+        if e.__str__():
+            log.error(f'error: {e}')
     except KeyboardInterrupt:
         pass
 
