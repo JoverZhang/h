@@ -252,11 +252,15 @@ class Core:
             p2 = command.find(mark_close, p1)
             if p2 < 0:
                 break
-            name = command[p1 + len(mark_open):p2]
-            data = input(f'Input argument ({name}): ')
-            if data is None:
-                data = ''
-            mark = mark_open + name + mark_close
+            full_name = command[p1 + len(mark_open):p2]
+
+            # handle default variable
+            name, sep, default = full_name.strip().partition(':')
+
+            data = input(f'Input argument ({full_name}): ')
+            if not data:
+                data = default or ''
+            mark = mark_open + full_name + mark_close
             command = command.replace(mark, data)
         return command
 
