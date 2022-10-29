@@ -320,7 +320,7 @@ class Core:
             variables.pop(name)
 
         # handle anonymous args
-        values = list(args.values())
+        values = [v for k, v in args.items() if type(k) is int]
         for v in list(variables.values()):
             if not values:
                 break
@@ -329,7 +329,7 @@ class Core:
 
         # handle unspecified variables
         for name, v in variables.items():
-            data = input(f'Input argument ({v["full_name"]}): ')
+            data = input(f'input variable ({v["full_name"]}): ')
             if not data:
                 data = v['default'] or ''
             command = command.replace(v['mark'], data)
