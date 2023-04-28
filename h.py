@@ -84,7 +84,7 @@ class Arguments:
 
         parser.add_argument('-f',
                             dest='config_file',
-                            type=str, default='~/.config/h_command/config',
+                            type=str, default='~/.config/h_command/config.toml',
                             help='config file')
         parser.add_argument('--no-history',
                             dest='no_history', action='store_true',
